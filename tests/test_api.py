@@ -46,6 +46,32 @@ class ValidationTests(unittest.TestCase):
             {"orders": [], "summary": "ノートレード"},
         )
 
+    def test_rejects_short_on_non_loanable_stock(self) -> None:
+        with self.assertRaises(ValidationError) as context:
+            validate_output(
+                {
+                    "orders": [
+                        {"code": "99840", "weight_bps": -1000, "reason": "short"}
+                    ],
+                    "summary": "short",
+                },
+                allowed_codes={"99840"},
+                shortable_codes=set(),
+            )
+        self.assertIn("ショートできません", " ".join(context.exception.errors))
+
+    def test_skips_short_check_when_api_omits_shortable(self) -> None:
+        result = validate_output(
+            {
+                "orders": [
+                    {"code": "99840", "weight_bps": -1000, "reason": "short"}
+                ],
+                "summary": "short",
+            },
+            allowed_codes={"99840"},
+        )
+        self.assertEqual(result["orders"][0]["weight_bps"], -1000)
+
     def test_rejects_rule_breaches(self) -> None:
         with self.assertRaises(ValidationError) as context:
             validate_output(
@@ -75,7 +101,7 @@ class ValidationTests(unittest.TestCase):
         self.assertIn("重複", combined)
         self.assertIn("20%", combined)
         self.assertIn("100%", combined)
-        self.assertIn("本日決算を発表しません", combined)
+        self.assertIn("本日の決算カレンダーにありません", combined)
 
 
 class ClientTests(unittest.TestCase):

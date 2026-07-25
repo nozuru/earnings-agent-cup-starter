@@ -19,7 +19,7 @@ MAX_REASON_LENGTH = 500
 
 
 class ApiError(RuntimeError):
-    """The Cup API rejected a request or could not be reached."""
+    """The Earnings Agent Cup API rejected a request or could not be reached."""
 
     def __init__(self, message: str, *, status: int | None = None):
         super().__init__(message)
@@ -39,7 +39,7 @@ class ValidationError(ValueError):
 
 
 class Client:
-    """Small dependency-free client for the public Cup API."""
+    """Small dependency-free client for the public Earnings Agent Cup API."""
 
     def __init__(
         self,
@@ -58,7 +58,7 @@ class Client:
         except ApiError as error:
             if error.status == 404:
                 raise NoOpenEvent(
-                    "現在、受付中の銘柄リストはありません。"
+                    "現在、受付中の決算カレンダーはありません。"
                 ) from error
             raise
 
@@ -99,7 +99,7 @@ class Client:
         )
         headers = {
             "Accept": "application/json",
-            "User-Agent": "eac-starter-kit/2026-v1",
+            "User-Agent": "eac-starter-kit/2026-v2",
         }
         if body is not None:
             headers["Content-Type"] = "application/json"
@@ -119,7 +119,7 @@ class Client:
                     loaded = json.loads(decoded)
                     if not isinstance(loaded, dict):
                         raise ApiError(
-                            "Cup APIの応答がJSONオブジェクトではありません。"
+                            "APIの応答がJSONオブジェクトではありません。"
                         )
                     return loaded
             except urllib.error.HTTPError as error:
@@ -130,18 +130,26 @@ class Client:
             except urllib.error.URLError as error:
                 if attempt + 1 == retries:
                     raise ApiError(
-                        f"Cup APIへの接続に失敗しました: {error.reason}"
+                        f"APIへの接続に失敗しました: {error.reason}"
                     ) from error
             except (UnicodeDecodeError, json.JSONDecodeError) as error:
-                raise ApiError("Cup APIから不正なJSON応答を受信しました。") from error
+                raise ApiError("APIから不正なJSON応答を受信しました。") from error
 
             time.sleep(2**attempt)
 
-        raise ApiError("Cup APIへのリクエストに失敗しました。")
+        raise ApiError("APIへのリクエストに失敗しました。")
 
 
-def validate_output(value: Any, *, allowed_codes: set[str]) -> dict[str, Any]:
-    """Validate and normalize an agent response before any network write."""
+def validate_output(
+    value: Any,
+    *,
+    allowed_codes: set[str],
+    shortable_codes: set[str] | None = None,
+) -> dict[str, Any]:
+    """Validate and normalize an agent response before any network write.
+
+    shortable_codes が None のときはショート可否をサーバー判定に任せる。
+    """
 
     errors: list[str] = []
     if not isinstance(value, dict):
@@ -190,7 +198,7 @@ def validate_output(value: Any, *, allowed_codes: set[str]) -> dict[str, Any]:
         else:
             seen.add(code)
             if code not in allowed_codes:
-                errors.append(f"銘柄 {code} は本日決算を発表しません。")
+                errors.append(f"銘柄 {code} は本日の決算カレンダーにありません。")
 
         weight_valid = type(weight) is int and weight != 0
         if not weight_valid:
@@ -199,6 +207,15 @@ def validate_output(value: Any, *, allowed_codes: set[str]) -> dict[str, Any]:
             gross_weight_bps += abs(weight)
             if abs(weight) > MAX_SINGLE_WEIGHT_BPS:
                 errors.append(f"銘柄 {code or index} の比率が20%を超えています。")
+            if (
+                weight < 0
+                and code_valid
+                and shortable_codes is not None
+                and code not in shortable_codes
+            ):
+                errors.append(
+                    f"銘柄 {code} は貸借銘柄ではないためショートできません。"
+                )
 
         if not reason:
             errors.append(f"{label}.reason は1文字以上で指定してください。")
@@ -218,8 +235,8 @@ def validate_output(value: Any, *, allowed_codes: set[str]) -> dict[str, Any]:
 
     if gross_weight_bps > MAX_GROSS_WEIGHT_BPS:
         errors.append(
-            "グロス投資比率が"
-            f"{gross_weight_bps / 100:.2f}%です。100%以内にしてください。"
+            "投資比率の合計が"
+            f"{gross_weight_bps / 100:.2f}%です。合計100%以内にしてください。"
         )
 
     if errors:
@@ -235,16 +252,16 @@ def ensure_submission_open(event: dict[str, Any]) -> None:
     """Refuse a local submission after the advertised deadline."""
 
     if event.get("is_open") is False:
-        raise ApiError("対象イベントの受付は終了しています。提出しません。")
+        raise ApiError("この対象日の受付はすでに終了しています。提出しません。")
 
     raw_deadline = event.get("deadline_at")
     if not isinstance(raw_deadline, str):
-        raise ApiError("対象イベントの締切時刻を取得できません。提出しません。")
+        raise ApiError("この対象日の締切時刻を取得できません。提出しません。")
 
     try:
         deadline = datetime.fromisoformat(raw_deadline.replace("Z", "+00:00"))
     except ValueError as error:
-        raise ApiError("対象イベントの締切時刻が不正です。提出しません。") from error
+        raise ApiError("この対象日の締切時刻が不正です。提出しません。") from error
     if deadline.tzinfo is None:
         deadline = deadline.replace(tzinfo=timezone.utc)
 
@@ -265,7 +282,7 @@ def _http_error_message(error: urllib.error.HTTPError) -> str:
                 clean = [item for item in details if isinstance(item, str)]
                 if clean:
                     suffix = " " + " / ".join(clean)
-            return f"Cup API HTTP {error.code}: {message}{suffix}"
+            return f"API HTTP {error.code}: {message}{suffix}"
     except json.JSONDecodeError:
         pass
-    return f"Cup API HTTP {error.code}: {raw[:500]}"
+    return f"API HTTP {error.code}: {raw[:500]}"

@@ -106,12 +106,27 @@ def finalize_run(
             if isinstance(raw_response, dict)
             else extract_json_object(raw_response)
         )
-        allowed_codes = {
-            str(event.get("code", "")).strip().upper()
+        published = [
+            event
             for event in session.event.get("events", [])
             if isinstance(event, dict) and event.get("status") == "published"
+        ]
+        allowed_codes = {
+            str(event.get("code", "")).strip().upper() for event in published
         }
-        validated = validate_output(parsed, allowed_codes=allowed_codes)
+        # 旧APIの応答にはshortableが無い。その場合はサーバー判定に任せる。
+        shortable_codes = (
+            {
+                str(event.get("code", "")).strip().upper()
+                for event in published
+                if event.get("shortable") is True
+            }
+            if any("shortable" in event for event in published)
+            else None
+        )
+        validated = validate_output(
+            parsed, allowed_codes=allowed_codes, shortable_codes=shortable_codes
+        )
     except (ValueError, ValidationError) as error:
         error_path = session.artifact_prefix.with_name(
             f"{session.artifact_prefix.name}-error.txt"
@@ -197,7 +212,7 @@ def finalize_run(
     result.update(
         {
             "status": "submitted",
-            "message": "Cup APIへの提出と提出後照合が完了しました。",
+            "message": "提出と、提出後の内容照合が完了しました。",
             "submission": accepted,
         }
     )
@@ -214,6 +229,7 @@ def build_prompt(
             "company_name": item.get("company_name"),
             "market": item.get("market"),
             "sector": item.get("sector"),
+            "shortable": item.get("shortable"),
         }
         for item in event.get("events", [])
         if isinstance(item, dict) and item.get("status") == "published"
@@ -226,7 +242,7 @@ def build_prompt(
     }
     return (
         f"{user_prompt.strip()}\n\n"
-        "以下はCup APIから取得した今回の確定コンテキストです。"
+        "以下は Earnings Agent Cup のAPIから取得した、今日の対象日・締切・決算カレンダーです。"
         "注文は events に含まれる銘柄だけにしてください。\n"
         f"{json.dumps(context, ensure_ascii=False, indent=2)}\n\n"
         "最終出力は次のJSON Schemaに従うJSONオブジェクト1つにしてください。\n"

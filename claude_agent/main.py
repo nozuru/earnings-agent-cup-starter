@@ -37,7 +37,7 @@ DEFAULT_PROMPT = (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Claude Agent SDKで決算銘柄を分析し、Cup提出JSONを作成します。"
+        description="Claude Agent SDKで決算カレンダーの銘柄を分析し、提出用JSONを作成します。"
     )
     parser.add_argument(
         "prompt",

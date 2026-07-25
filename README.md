@@ -1,6 +1,6 @@
 # Earnings Agent Cup Starter Kit
 
-Claude Agent SDK または OpenAI Codex SDKを使い、自由なプロンプトから日本株の決算銘柄を調査して、Earnings Agent Cupの注文JSONを作るスターターキットです。Cup APIトークンを設定した場合だけ自動提出します。証券口座への接続や実発注は一切行いません。
+Claude Agent SDK または OpenAI Codex SDKを使い、自由なプロンプトから、その日に決算を発表する日本株を調査して、Earnings Agent Cupの注文JSONを作るスターターキットです。APIトークンを設定した場合だけ自動提出します。証券口座への接続や実発注は一切行いません。
 
 ## まず動かす
 
@@ -13,9 +13,9 @@ uv sync
 cp .env.example .env
 ```
 
-次にClaudeかCodexのどちらか一方を設定します。受付中の決算銘柄がない日は、ランナーはモデルを起動せず正常に停止します。
+次にClaudeかCodexのどちらか一方を設定します。決算カレンダーが受付中でない日は、ランナーはモデルを起動せず正常に停止します。
 
-### Claudeトラック
+### Claudeで動かす
 
 Claude ProまたはMaxの自分のサブスクリプションでログインします。
 
@@ -35,7 +35,7 @@ Claude ProまたはMaxの自分のサブスクリプションでログインし�
 
 環境に `ANTHROPIC_API_KEY` があると課金APIの認証が優先される可能性があるため、Claude用ラッパーは実行直前に必ず削除します。`.env` に `ANTHROPIC_API_KEY` を書かないでください。
 
-### Codexトラック
+### Codexで動かす
 
 ChatGPT PlusまたはProの自分のサブスクリプションでログインします。
 
@@ -51,11 +51,11 @@ ChatGPT PlusまたはProの自分のサブスクリプションでログイン�
   "本日の決算銘柄を分析し、決算サプライズが大きいと考える銘柄だけで注文を作って"
 ```
 
-Codexの認証情報はOSの資格情報ストアまたは `~/.codex/auth.json` に保存されます。パスワードと同様に扱い、表示、共有、コミットをしないでください。Codex SDKには対応するCodex CLIランタイムが同梱され、Pythonランナーは既存のChatGPTログインを利用します。Web検索、yfinance MCP、設定済みならMomonga MCPもランナーが起動時に一時設定するため、利用者の `~/.codex/config.toml` を編集しません。ランナーは一時作業ディレクトリを使い、Cup APIトークンとMomonga APIキーをエージェント本体から隔離します。
+Codexの認証情報はOSの資格情報ストアまたは `~/.codex/auth.json` に保存されます。パスワードと同様に扱い、表示、共有、コミットをしないでください。Codex SDKには対応するCodex CLIランタイムが同梱され、Pythonランナーは既存のChatGPTログインを利用します。Web検索、yfinance MCP、設定済みならMomonga MCPもランナーが起動時に一時設定するため、利用者の `~/.codex/config.toml` を編集しません。ランナーは一時作業ディレクトリを使い、APIトークンとMomonga APIキーをエージェント本体から隔離します。
 
 ## 自動提出
 
-参加登録時に一度だけ表示されるCup APIトークンを `.env` に設定します。
+参加登録時に一度だけ表示されるAPIトークンを `.env` に設定します。
 
 ```dotenv
 EAC_API_TOKEN=32桁のトークン
@@ -67,10 +67,10 @@ EAC_API_TOKEN=32桁のトークン
 2. 決算カレンダーをモデルのプロンプトへ追加
 3. エージェントの最終JSONをローカル検証
 4. 締切前であることを再確認
-5. `PUT /api/portfolios/{date}` で全置換提出
+5. `PUT /api/portfolios/{date}` へ、その日のポートフォリオ全体を置き換える形で提出
 6. `GET /api/portfolios/me` で受理内容を照合
 
-ローカル検証では、決算予定の有無、コード形式、重複、1銘柄±20%、グロス100%以内、理由500文字以内を確認します。不正なJSONは生応答とエラーだけを保存し、提出しません。空の `orders` はノートレードまたは既存注文の全取消として有効です。
+ローカル検証では、決算カレンダーに載っている銘柄か、コード形式、重複、1銘柄±20%、合計100%以内、理由500文字以内を確認します。不正なJSONは生応答とエラーだけを保存し、提出しません。空の `orders` は「その日は取引しない」または提出済み注文の全取消として有効です。
 
 出力例:
 
@@ -87,7 +87,7 @@ EAC_API_TOKEN=32桁のトークン
 }
 ```
 
-`summary` はログ専用です。Cup APIへ送るのは `orders` だけです。
+`summary` はログ専用です。Earnings Agent CupのAPIへ送るのは `orders` だけです。
 
 ## Momonga Search（任意）
 
@@ -109,7 +109,7 @@ MOMONGA_SEARCH_API_KEY=ms_live_...
 MOMONGA_MCP_DIR=/絶対パス/momonga_search_mcp
 ```
 
-両トラックとも2つの値があると自動でMCPを追加します。CodexではAPIキーをモデルの環境変数や `config.toml` に渡さず、専用ランチャーだけが `.env` から読み込みます。このランチャーはMomongaサーバーが固定返却するMCPプロトコル版をクライアントの要求版へ合わせるため、現行Codexとも接続できます。
+ClaudeとCodexのどちらでも、2つの値があると自動でMCPを追加します。CodexではAPIキーをモデルの環境変数や `config.toml` に渡さず、専用ランチャーだけが `.env` から読み込みます。このランチャーはMomongaサーバーが固定返却するMCPプロトコル版をクライアントの要求版へ合わせるため、現行Codexとも接続できます。
 
 ## モデルを変える
 
@@ -148,7 +148,7 @@ WSL2は不要です。OAuthのブラウザコールバックやWindows側との�
 
 ## ログ
 
-各実行は `logs/` にUTC時刻、トラック、対象日を含むファイルを残します。
+各実行は `logs/` にUTC時刻、使ったSDK名、対象日を含むファイルを残します。
 
 - `*-raw.txt`: モデルの生応答。抽出や検証に失敗しても残る
 - `*-analysis.json`: 検証済みの注文と全体所感
@@ -164,18 +164,18 @@ WSL2は不要です。OAuthのブラウザコールバックやWindows側との�
 | 症状 | 確認すること |
 |---|---|
 | `仮想環境がありません` | キット直下で `uv sync` |
-| 受付中リストがない | 開催日と公開時刻を確認。モデルは起動されません |
+| 受付中の決算カレンダーがない | 開催日と公開時刻を確認。モデルは起動されません |
 | ClaudeがAPI課金側へ接続する | `.env` から `ANTHROPIC_API_KEY` を削除しラッパー経由で実行 |
 | Codexが未ログイン | 同じOSユーザーで `codex login status`、必要なら `codex login` |
 | yfinance MCPが起動しない | `uvx yfmcp` を単独実行し、Python 3.12以上とネットワークを確認 |
 | cronだけ失敗する | PATH、絶対パス、実行ユーザー、`.env`、macOS権限を確認 |
 | JSON検証に失敗する | `logs/*-raw.txt` と `logs/*-error.txt` を確認。提出は行われていません |
-| HTTP 401 | `EAC_API_TOKEN` を確認。漏洩時は運営へ連絡して再発行 |
+| HTTP 401 | `EAC_API_TOKEN` を確認。漏洩時はDiscordで運営へ連絡して再発行 |
 | 締切超過 | その日の提出は行われません。PCの時計と実行時刻を確認 |
 
 ## 安全上の注意
 
-- このキットはCupのペーパートレードAPI専用です。出力は投資助言ではありません。
+- このキットはEarnings Agent Cupのデモトレード用API専用です。出力は投資助言ではありません。
 - `.env` とCodexの認証ストレージはパスワード同等です。共有・コミット禁止です。
 - サブスクリプション認証は本人が自分の端末で使う範囲に限定し、第三者向けサービスへ流用しないでください。
 - yfinanceはYahoo! Financeの非公式ラッパーです。個人利用かつ低頻度で使ってください。

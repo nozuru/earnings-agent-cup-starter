@@ -52,7 +52,7 @@ CODEX_ENV_ALLOWLIST = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Codex SDKで決算銘柄を分析し、Cup提出JSONを作成します。"
+        description="Codex SDKで決算カレンダーの銘柄を分析し、提出用JSONを作成します。"
     )
     parser.add_argument(
         "prompt",

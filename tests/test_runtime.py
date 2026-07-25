@@ -42,7 +42,7 @@ class RuntimeTests(unittest.TestCase):
             {
                 "target_date": "2026-07-27",
                 "deadline_at": "2026-07-27T08:00:00Z",
-                "rule_version": "2026-v1",
+                "rule_version": "2026-v2",
                 "events": [
                     {
                         "code": "72030",
