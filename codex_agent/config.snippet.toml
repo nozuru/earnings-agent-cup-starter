@@ -1,0 +1,13 @@
+# Pythonランナーは同じ内容を起動時に一時設定するため、通常はマージ不要です。
+# Codex CLIを単独で調査に使う場合だけ、既存設定と重複しないよう利用してください。
+web_search = "live"
+model_reasoning_effort = "low"
+
+[mcp_servers.yfinance]
+command = "uvx"
+args = ["yfmcp"]
+startup_timeout_sec = 30
+tool_timeout_sec = 120
+
+# Momonga SearchはAPIキー隔離とMCPプロトコル互換処理が必要なため、
+# `python -m codex_agent.main` または scripts/run_codex.* から起動してください。

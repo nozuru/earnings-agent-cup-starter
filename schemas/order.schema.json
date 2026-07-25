@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://earnings.jpsi-association.com/schemas/agent-order.json",
+  "title": "Earnings Agent Cup agent output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["orders", "summary"],
+  "properties": {
+    "orders": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "weight_bps", "reason"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^[0-9A-Z]{4,5}$"
+          },
+          "weight_bps": {
+            "type": "integer",
+            "minimum": -2000,
+            "maximum": 2000,
+            "not": {
+              "type": "integer",
+              "const": 0
+            }
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "string"
+    }
+  }
+}
