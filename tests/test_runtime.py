@@ -8,8 +8,7 @@ from unittest.mock import patch
 from eac.api import ApiError
 from eac.runtime import (
     ROOT,
-    AlreadySubmitted,
-    _raise_if_submitted,
+    _has_submission,
     build_prompt,
     codex_output_schema,
     detach_submission_secret,
@@ -130,26 +129,25 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("ToolSearch", allowed)
         self.assertIn("mcp__yfinance__*", allowed)
 
-    def test_scheduled_run_stops_when_the_day_is_already_submitted(self) -> None:
+    def test_submission_exists_when_verify_succeeds(self) -> None:
         client = _FakeClient(verify_status=None)
-        with self.assertRaises(AlreadySubmitted):
-            _raise_if_submitted(client, "2026-07-27")
+        self.assertTrue(_has_submission(client, "2026-07-27"))
         self.assertEqual(client.verified, ["2026-07-27"])
 
-    def test_scheduled_run_continues_when_nothing_is_submitted_yet(self) -> None:
+    def test_submission_missing_when_verify_returns_404(self) -> None:
         client = _FakeClient(verify_status=404)
-        _raise_if_submitted(client, "2026-07-27")
+        self.assertFalse(_has_submission(client, "2026-07-27"))
         self.assertEqual(client.verified, ["2026-07-27"])
 
     def test_submission_check_is_skipped_without_a_token(self) -> None:
         client = _FakeClient(verify_status=None, token="")
-        _raise_if_submitted(client, "2026-07-27")
+        self.assertFalse(_has_submission(client, "2026-07-27"))
         self.assertEqual(client.verified, [])
 
     def test_submission_check_surfaces_unexpected_api_errors(self) -> None:
         client = _FakeClient(verify_status=500)
         with self.assertRaises(ApiError):
-            _raise_if_submitted(client, "2026-07-27")
+            _has_submission(client, "2026-07-27")
 
     def test_scheduled_runs_opt_in_through_a_flag(self) -> None:
         with patch("sys.argv", ["run", "--skip-if-submitted", "分析して"]):

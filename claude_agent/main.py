@@ -22,6 +22,7 @@ from eac.runtime import (
     AgentRun,
     ROOT,
     detach_submission_secret,
+    exit_skipped,
     exit_with_error,
     finalize_run,
     load_system_prompt,
@@ -136,8 +137,7 @@ async def async_main() -> int:
         print_result(finalize_run(session, response))
         return 0
     except AlreadySubmitted as skipped:
-        print(str(skipped))
-        return 0
+        return exit_skipped(skipped)
     except CLI_ERRORS as error:
         return exit_with_error(error)
 

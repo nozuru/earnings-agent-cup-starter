@@ -92,32 +92,32 @@ def prepare_run(
         base_url=os.getenv("EAC_BASE_URL", DEFAULT_BASE_URL),
     )
     event = client.open_event()
-    if skip_if_submitted:
-        _raise_if_submitted(client, str(event.get("target_date", "")))
+    target_date = str(event.get("target_date", ""))
+    if skip_if_submitted and _has_submission(client, target_date):
+        raise AlreadySubmitted(
+            f"{target_date} はすでに提出済みです。モデルを起動せずに終了します。"
+        )
     schema = load_schema()
     prompt = build_prompt(user_prompt, event, schema)
 
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    target_date = str(event.get("target_date", "unknown"))
-    prefix = LOGS_DIR / f"{timestamp}-{track}-{target_date}"
+    prefix = LOGS_DIR / f"{timestamp}-{track}-{target_date or 'unknown'}"
     return RunSession(track, client, event, schema, prompt, prefix)
 
 
-def _raise_if_submitted(client: Client, target_date: str) -> None:
-    """スケジュール実行が同じ日を二度走らせないための確認。手動実行では通らない。"""
+def _has_submission(client: Client, target_date: str) -> bool:
+    """verify が提出を見つけたら True。404 は未提出。トークン無しは確認しない。"""
 
     if not client.token or not target_date:
-        return
+        return False
     try:
         client.verify(target_date)
     except ApiError as error:
         if error.status == 404:
-            return
+            return False
         raise
-    raise AlreadySubmitted(
-        f"{target_date} はすでに提出済みです。モデルを起動せずに終了します。"
-    )
+    return True
 
 
 def finalize_run(
@@ -367,6 +367,13 @@ def parse_prompt_args(description: str) -> argparse.Namespace:
 def exit_with_error(error: BaseException) -> int:
     print(str(error), file=sys.stderr)
     return 1
+
+
+def exit_skipped(message: BaseException | str) -> int:
+    """成功扱いの早期終了（提出済みスキップなど）。stdout に理由を出して 0 を返す。"""
+
+    print(str(message))
+    return 0
 
 
 def codex_output_schema(value: Any) -> Any:
