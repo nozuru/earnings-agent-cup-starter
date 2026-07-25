@@ -25,7 +25,7 @@ from eac.runtime import (
 )
 
 DEFAULT_PROMPT = (
-    "本日の対象銘柄を分析し、決算サプライズの確度とリスクを比較して、"
+    "本日の決算銘柄を分析し、決算サプライズの確度とリスクを比較して、"
     "自信のあるものだけで注文判断を出してください。"
 )
 CODEX_ENV_ALLOWLIST = {
@@ -52,7 +52,7 @@ CODEX_ENV_ALLOWLIST = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Codex SDKで対象銘柄を分析し、Cup提出JSONを作成します。"
+        description="Codex SDKで決算銘柄を分析し、Cup提出JSONを作成します。"
     )
     parser.add_argument(
         "prompt",

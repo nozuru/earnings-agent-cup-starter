@@ -58,7 +58,7 @@ class Client:
         except ApiError as error:
             if error.status == 404:
                 raise NoOpenEvent(
-                    "現在、受付中の対象銘柄リストはありません。"
+                    "現在、受付中の銘柄リストはありません。"
                 ) from error
             raise
 
@@ -190,7 +190,7 @@ def validate_output(value: Any, *, allowed_codes: set[str]) -> dict[str, Any]:
         else:
             seen.add(code)
             if code not in allowed_codes:
-                errors.append(f"銘柄 {code} は本日の対象銘柄ではありません。")
+                errors.append(f"銘柄 {code} は本日決算を発表しません。")
 
         weight_valid = type(weight) is int and weight != 0
         if not weight_valid:

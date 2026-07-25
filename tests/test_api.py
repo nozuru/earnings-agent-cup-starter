@@ -75,7 +75,7 @@ class ValidationTests(unittest.TestCase):
         self.assertIn("重複", combined)
         self.assertIn("20%", combined)
         self.assertIn("100%", combined)
-        self.assertIn("対象銘柄", combined)
+        self.assertIn("本日決算を発表しません", combined)
 
 
 class ClientTests(unittest.TestCase):
