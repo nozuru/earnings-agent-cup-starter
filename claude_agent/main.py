@@ -18,6 +18,7 @@ from claude_agent_sdk import (
 
 from eac.runtime import (
     CLI_ERRORS,
+    AlreadySubmitted,
     AgentRun,
     ROOT,
     detach_submission_secret,
@@ -121,7 +122,9 @@ async def invoke_agent(prompt: str) -> AgentRun:
 async def async_main() -> int:
     args = parse_args()
     try:
-        session = prepare_run("claude", args.prompt)
+        session = prepare_run(
+            "claude", args.prompt, skip_if_submitted=args.skip_if_submitted
+        )
         if not os.getenv("CLAUDE_CODE_OAUTH_TOKEN", "").strip():
             raise RuntimeError(
                 "CLAUDE_CODE_OAUTH_TOKEN が未設定です。"
@@ -131,6 +134,9 @@ async def async_main() -> int:
         os.environ.pop("ANTHROPIC_API_KEY", None)
         response = await invoke_agent(session.prompt)
         print_result(finalize_run(session, response))
+        return 0
+    except AlreadySubmitted as skipped:
+        print(str(skipped))
         return 0
     except CLI_ERRORS as error:
         return exit_with_error(error)

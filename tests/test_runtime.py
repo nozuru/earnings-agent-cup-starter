@@ -5,17 +5,36 @@ import os
 import unittest
 from unittest.mock import patch
 
+from eac.api import ApiError
 from eac.runtime import (
     ROOT,
+    AlreadySubmitted,
+    _raise_if_submitted,
     build_prompt,
     codex_output_schema,
     detach_submission_secret,
     extract_json_object,
     load_system_prompt,
+    parse_prompt_args,
 )
 from codex_agent.main import _codex_config_overrides, _codex_environment
 from claude_agent.main import _mcp_config
 from eac.momonga_mcp import _rewrite_initialize_response
+
+
+class _FakeClient:
+    """verify() の応答だけを差し替えた最小のスタブ。"""
+
+    def __init__(self, *, verify_status: int | None, token: str = "eac_test") -> None:
+        self.token = token
+        self.verify_status = verify_status
+        self.verified: list[str] = []
+
+    def verify(self, target_date: str) -> dict[str, object]:
+        self.verified.append(target_date)
+        if self.verify_status is not None:
+            raise ApiError("stub", status=self.verify_status)
+        return {"target_date": target_date, "orders": []}
 
 
 class RuntimeTests(unittest.TestCase):
@@ -110,6 +129,38 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(servers["yfinance"]["alwaysLoad"])
         self.assertIn("ToolSearch", allowed)
         self.assertIn("mcp__yfinance__*", allowed)
+
+    def test_scheduled_run_stops_when_the_day_is_already_submitted(self) -> None:
+        client = _FakeClient(verify_status=None)
+        with self.assertRaises(AlreadySubmitted):
+            _raise_if_submitted(client, "2026-07-27")
+        self.assertEqual(client.verified, ["2026-07-27"])
+
+    def test_scheduled_run_continues_when_nothing_is_submitted_yet(self) -> None:
+        client = _FakeClient(verify_status=404)
+        _raise_if_submitted(client, "2026-07-27")
+        self.assertEqual(client.verified, ["2026-07-27"])
+
+    def test_submission_check_is_skipped_without_a_token(self) -> None:
+        client = _FakeClient(verify_status=None, token="")
+        _raise_if_submitted(client, "2026-07-27")
+        self.assertEqual(client.verified, [])
+
+    def test_submission_check_surfaces_unexpected_api_errors(self) -> None:
+        client = _FakeClient(verify_status=500)
+        with self.assertRaises(ApiError):
+            _raise_if_submitted(client, "2026-07-27")
+
+    def test_scheduled_runs_opt_in_through_a_flag(self) -> None:
+        with patch("sys.argv", ["run", "--skip-if-submitted", "分析して"]):
+            args = parse_prompt_args("test")
+        self.assertTrue(args.skip_if_submitted)
+        self.assertEqual(args.prompt, "分析して")
+
+    def test_manual_runs_may_overwrite_an_existing_submission(self) -> None:
+        with patch("sys.argv", ["run"]):
+            args = parse_prompt_args("test")
+        self.assertFalse(args.skip_if_submitted)
 
     def test_momonga_launcher_negotiates_requested_protocol_version(self) -> None:
         rewritten = _rewrite_initialize_response(

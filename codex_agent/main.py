@@ -14,6 +14,7 @@ from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
 from eac.runtime import (
     CLI_ERRORS,
+    AlreadySubmitted,
     AgentRun,
     ROOT,
     codex_output_schema,
@@ -179,10 +180,15 @@ def _codex_environment_from(values: dict[str, str]) -> dict[str, str]:
 def main() -> int:
     args = parse_args()
     try:
-        session = prepare_run("codex", args.prompt)
+        session = prepare_run(
+            "codex", args.prompt, skip_if_submitted=args.skip_if_submitted
+        )
         detach_submission_secret()
         response = invoke_agent(session.prompt, session.schema)
         print_result(finalize_run(session, response))
+        return 0
+    except AlreadySubmitted as skipped:
+        print(str(skipped))
         return 0
     except CLI_ERRORS as error:
         return exit_with_error(error)

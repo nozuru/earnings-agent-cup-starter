@@ -50,6 +50,10 @@ DEFAULT_PROMPT = (
 CLI_ERRORS = (ApiError, NoOpenEvent, ValidationError, ValueError, RuntimeError)
 
 
+class AlreadySubmitted(Exception):
+    """その日の提出がすでにあるため実行を見送った。失敗ではない。"""
+
+
 @dataclass(frozen=True)
 class RunSession:
     track: str
@@ -74,7 +78,12 @@ class MomongaSettings:
     mcp_dir: Path
 
 
-def prepare_run(track: str, user_prompt: str) -> RunSession:
+def prepare_run(
+    track: str,
+    user_prompt: str,
+    *,
+    skip_if_submitted: bool = False,
+) -> RunSession:
     """Load local configuration, fetch targets, and build the model prompt."""
 
     load_dotenv(ROOT / ".env", override=False)
@@ -83,6 +92,8 @@ def prepare_run(track: str, user_prompt: str) -> RunSession:
         base_url=os.getenv("EAC_BASE_URL", DEFAULT_BASE_URL),
     )
     event = client.open_event()
+    if skip_if_submitted:
+        _raise_if_submitted(client, str(event.get("target_date", "")))
     schema = load_schema()
     prompt = build_prompt(user_prompt, event, schema)
 
@@ -91,6 +102,22 @@ def prepare_run(track: str, user_prompt: str) -> RunSession:
     target_date = str(event.get("target_date", "unknown"))
     prefix = LOGS_DIR / f"{timestamp}-{track}-{target_date}"
     return RunSession(track, client, event, schema, prompt, prefix)
+
+
+def _raise_if_submitted(client: Client, target_date: str) -> None:
+    """スケジュール実行が同じ日を二度走らせないための確認。手動実行では通らない。"""
+
+    if not client.token or not target_date:
+        return
+    try:
+        client.verify(target_date)
+    except ApiError as error:
+        if error.status == 404:
+            return
+        raise
+    raise AlreadySubmitted(
+        f"{target_date} はすでに提出済みです。モデルを起動せずに終了します。"
+    )
 
 
 def finalize_run(
@@ -328,6 +355,11 @@ def parse_prompt_args(description: str) -> argparse.Namespace:
         nargs="?",
         default=DEFAULT_PROMPT,
         help="自由形式の投資戦略プロンプト",
+    )
+    parser.add_argument(
+        "--skip-if-submitted",
+        action="store_true",
+        help="その日の提出がすでにあればモデルを起動せずに終了する（定期実行向け）",
     )
     return parser.parse_args()
 
