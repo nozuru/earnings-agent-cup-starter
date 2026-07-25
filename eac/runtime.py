@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,8 +15,10 @@ from typing import Any
 from dotenv import load_dotenv
 
 from .api import (
+    DEFAULT_BASE_URL,
     ApiError,
     Client,
+    NoOpenEvent,
     ValidationError,
     ensure_submission_open,
     validate_output,
@@ -39,6 +43,11 @@ CODEX_UNSUPPORTED_SCHEMA_KEYS = {
     "pattern",
     "not",
 }
+DEFAULT_PROMPT = (
+    "本日の決算銘柄を分析し、決算サプライズの確度とリスクを比較して、"
+    "自信のあるものだけで注文判断を出してください。"
+)
+CLI_ERRORS = (ApiError, NoOpenEvent, ValidationError, ValueError, RuntimeError)
 
 
 @dataclass(frozen=True)
@@ -59,13 +68,19 @@ class AgentRun:
     tool_calls: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class MomongaSettings:
+    api_key: str
+    mcp_dir: Path
+
+
 def prepare_run(track: str, user_prompt: str) -> RunSession:
     """Load local configuration, fetch targets, and build the model prompt."""
 
     load_dotenv(ROOT / ".env", override=False)
     client = Client(
         token=os.getenv("EAC_API_TOKEN", ""),
-        base_url=os.getenv("EAC_BASE_URL", "https://earnings.jpsi-association.com"),
+        base_url=os.getenv("EAC_BASE_URL", DEFAULT_BASE_URL),
     )
     event = client.open_event()
     schema = load_schema()
@@ -95,10 +110,7 @@ def finalize_run(
         if isinstance(raw_response, dict)
         else raw_response
     )
-    _write_text(
-        session.artifact_prefix.with_name(f"{session.artifact_prefix.name}-raw.txt"),
-        raw_text,
-    )
+    _write_text(_artifact_path(session, "raw.txt"), raw_text)
 
     try:
         parsed = (
@@ -106,45 +118,19 @@ def finalize_run(
             if isinstance(raw_response, dict)
             else extract_json_object(raw_response)
         )
-        published = [
-            event
-            for event in session.event.get("events", [])
-            if isinstance(event, dict) and event.get("status") == "published"
-        ]
-        allowed_codes = {
-            str(event.get("code", "")).strip().upper() for event in published
-        }
-        # 旧APIの応答にはshortableが無い。その場合はサーバー判定に任せる。
-        shortable_codes = (
-            {
-                str(event.get("code", "")).strip().upper()
-                for event in published
-                if event.get("shortable") is True
-            }
-            if any("shortable" in event for event in published)
-            else None
-        )
+        allowed_codes, shortable_codes = order_constraints(session.event)
         validated = validate_output(
             parsed, allowed_codes=allowed_codes, shortable_codes=shortable_codes
         )
     except (ValueError, ValidationError) as error:
-        error_path = session.artifact_prefix.with_name(
-            f"{session.artifact_prefix.name}-error.txt"
-        )
-        _write_text(error_path, str(error))
+        _write_text(_artifact_path(session, "error.txt"), str(error))
         raise
 
-    analysis_path = session.artifact_prefix.with_name(
-        f"{session.artifact_prefix.name}-analysis.json"
-    )
-    orders_path = session.artifact_prefix.with_name(
-        f"{session.artifact_prefix.name}-orders.json"
-    )
+    analysis_path = _artifact_path(session, "analysis.json")
+    orders_path = _artifact_path(session, "orders.json")
+    tools_path = _artifact_path(session, "tools.json")
     _write_json(analysis_path, validated)
     _write_json(orders_path, {"orders": validated["orders"]})
-    tools_path = session.artifact_prefix.with_name(
-        f"{session.artifact_prefix.name}-tools.json"
-    )
     _write_json(
         tools_path,
         {
@@ -173,41 +159,32 @@ def finalize_run(
     ensure_submission_open(session.event)
     target_date = str(session.event["target_date"])
     accepted = session.client.submit(target_date, validated["orders"])
-    submission_path = session.artifact_prefix.with_name(
-        f"{session.artifact_prefix.name}-submission.json"
-    )
-    _write_json(submission_path, {"accepted": accepted, "verified": None})
+    submission_path = _artifact_path(session, "submission.json")
+    _write_submission(submission_path, accepted=accepted)
     try:
         confirmed = session.client.verify(target_date)
     except ApiError as error:
-        _write_json(
+        _write_submission(
             submission_path,
-            {
-                "accepted": accepted,
-                "verified": None,
-                "verification_error": str(error),
-            },
+            accepted=accepted,
+            verification_error=str(error),
         )
         raise
     if _sorted_orders(confirmed.get("orders")) != _sorted_orders(
         accepted.get("orders")
     ):
-        _write_json(
+        _write_submission(
             submission_path,
-            {
-                "accepted": accepted,
-                "verified": confirmed,
-                "verification_error": "受理内容と照合結果が一致しません。",
-            },
+            accepted=accepted,
+            verified=confirmed,
+            verification_error="受理内容と照合結果が一致しません。",
         )
         raise ApiError("提出後の照合結果が受理内容と一致しません。")
 
-    _write_json(
+    _write_submission(
         submission_path,
-        {
-            "accepted": accepted,
-            "verified": confirmed,
-        },
+        accepted=accepted,
+        verified=confirmed,
     )
     result.update(
         {
@@ -231,8 +208,7 @@ def build_prompt(
             "sector": item.get("sector"),
             "shortable": item.get("shortable"),
         }
-        for item in event.get("events", [])
-        if isinstance(item, dict) and item.get("status") == "published"
+        for item in published_events(event)
     ]
     context = {
         "target_date": event.get("target_date"),
@@ -248,6 +224,36 @@ def build_prompt(
         "最終出力は次のJSON Schemaに従うJSONオブジェクト1つにしてください。\n"
         f"{json.dumps(schema, ensure_ascii=False, indent=2)}"
     )
+
+
+def published_events(event: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        item
+        for item in event.get("events", [])
+        if isinstance(item, dict) and item.get("status") == "published"
+    ]
+
+
+def order_constraints(
+    event: dict[str, Any],
+) -> tuple[set[str], set[str] | None]:
+    """Return allowed codes and optional shortable codes for local validation."""
+
+    published = published_events(event)
+    allowed_codes = {
+        str(item.get("code", "")).strip().upper() for item in published
+    }
+    # 旧APIの応答にはshortableが無い。その場合はサーバー判定に任せる。
+    shortable_codes = (
+        {
+            str(item.get("code", "")).strip().upper()
+            for item in published
+            if item.get("shortable") is True
+        }
+        if any("shortable" in item for item in published)
+        else None
+    )
+    return allowed_codes, shortable_codes
 
 
 def extract_json_object(text: str) -> dict[str, Any]:
@@ -297,6 +303,40 @@ def detach_submission_secret() -> None:
     os.environ.pop("EAC_API_TOKEN", None)
 
 
+def resolve_momonga_settings() -> MomongaSettings | None:
+    """Resolve optional Momonga Search settings shared by both agent tracks."""
+
+    key = os.getenv("MOMONGA_SEARCH_API_KEY", "").strip()
+    directory = os.getenv("MOMONGA_MCP_DIR", "").strip()
+    if not key and not directory:
+        return None
+    if not key or not directory:
+        raise ValueError(
+            "Momonga Searchを使うには MOMONGA_SEARCH_API_KEY と "
+            "MOMONGA_MCP_DIR の両方を設定してください。"
+        )
+    mcp_dir = Path(directory).expanduser().resolve()
+    if not mcp_dir.is_dir():
+        raise ValueError(f"MOMONGA_MCP_DIR が見つかりません: {mcp_dir}")
+    return MomongaSettings(api_key=key, mcp_dir=mcp_dir)
+
+
+def parse_prompt_args(description: str) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument(
+        "prompt",
+        nargs="?",
+        default=DEFAULT_PROMPT,
+        help="自由形式の投資戦略プロンプト",
+    )
+    return parser.parse_args()
+
+
+def exit_with_error(error: BaseException) -> int:
+    print(str(error), file=sys.stderr)
+    return 1
+
+
 def codex_output_schema(value: Any) -> Any:
     """Keep structural JSON Schema while local validation enforces constraints."""
 
@@ -313,6 +353,25 @@ def codex_output_schema(value: Any) -> Any:
 
 def print_result(result: dict[str, Any]) -> None:
     print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def _artifact_path(session: RunSession, suffix: str) -> Path:
+    return session.artifact_prefix.with_name(
+        f"{session.artifact_prefix.name}-{suffix}"
+    )
+
+
+def _write_submission(
+    path: Path,
+    *,
+    accepted: dict[str, Any],
+    verified: dict[str, Any] | None = None,
+    verification_error: str | None = None,
+) -> None:
+    payload: dict[str, Any] = {"accepted": accepted, "verified": verified}
+    if verification_error is not None:
+        payload["verification_error"] = verification_error
+    _write_json(path, payload)
 
 
 def _sorted_orders(value: Any) -> list[dict[str, Any]]:

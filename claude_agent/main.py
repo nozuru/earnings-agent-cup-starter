@@ -5,8 +5,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
-import sys
-from pathlib import Path
 from typing import Any
 
 from claude_agent_sdk import (
@@ -18,34 +16,25 @@ from claude_agent_sdk import (
     query,
 )
 
-from eac.api import ApiError, NoOpenEvent, ValidationError
 from eac.runtime import (
+    CLI_ERRORS,
     AgentRun,
     ROOT,
     detach_submission_secret,
+    exit_with_error,
     finalize_run,
     load_system_prompt,
+    parse_prompt_args,
     prepare_run,
     print_result,
-)
-
-DEFAULT_PROMPT = (
-    "本日の決算銘柄を分析し、決算サプライズの確度とリスクを比較して、"
-    "自信のあるものだけで注文判断を出してください。"
+    resolve_momonga_settings,
 )
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Claude Agent SDKで決算カレンダーの銘柄を分析し、提出用JSONを作成します。"
+    return parse_prompt_args(
+        "Claude Agent SDKで決算カレンダーの銘柄を分析し、提出用JSONを作成します。"
     )
-    parser.add_argument(
-        "prompt",
-        nargs="?",
-        default=DEFAULT_PROMPT,
-        help="自由形式の投資戦略プロンプト",
-    )
-    return parser.parse_args()
 
 
 def _mcp_config() -> tuple[dict[str, Any], list[str]]:
@@ -64,27 +53,18 @@ def _mcp_config() -> tuple[dict[str, Any], list[str]]:
         "mcp__yfinance__*",
     ]
 
-    key = os.getenv("MOMONGA_SEARCH_API_KEY", "").strip()
-    directory = os.getenv("MOMONGA_MCP_DIR", "").strip()
-    if key or directory:
-        if not key or not directory:
-            raise ValueError(
-                "Momonga Searchを使うには MOMONGA_SEARCH_API_KEY と "
-                "MOMONGA_MCP_DIR の両方を設定してください。"
-            )
-        mcp_dir = Path(directory).expanduser().resolve()
-        if not mcp_dir.is_dir():
-            raise ValueError(f"MOMONGA_MCP_DIR が見つかりません: {mcp_dir}")
+    momonga = resolve_momonga_settings()
+    if momonga is not None:
         servers["momonga"] = {
             "type": "stdio",
             "command": "uv",
             "args": [
                 "--directory",
-                str(mcp_dir),
+                str(momonga.mcp_dir),
                 "run",
                 "momonga-search-mcp",
             ],
-            "env": {"MOMONGA_SEARCH_API_KEY": key},
+            "env": {"MOMONGA_SEARCH_API_KEY": momonga.api_key},
         }
         allowed_tools.append("mcp__momonga__*")
     return servers, allowed_tools
@@ -152,9 +132,8 @@ async def async_main() -> int:
         response = await invoke_agent(session.prompt)
         print_result(finalize_run(session, response))
         return 0
-    except (ApiError, NoOpenEvent, ValidationError, ValueError, RuntimeError) as error:
-        print(str(error), file=sys.stderr)
-        return 1
+    except CLI_ERRORS as error:
+        return exit_with_error(error)
 
 
 def main() -> int:

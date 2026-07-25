@@ -7,27 +7,25 @@ from contextlib import contextmanager
 import json
 import os
 import shutil
-import sys
 import tempfile
 from pathlib import Path
 
 from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
-from eac.api import ApiError, NoOpenEvent, ValidationError
 from eac.runtime import (
+    CLI_ERRORS,
     AgentRun,
     ROOT,
     codex_output_schema,
     detach_submission_secret,
+    exit_with_error,
     finalize_run,
+    parse_prompt_args,
     prepare_run,
     print_result,
+    resolve_momonga_settings,
 )
 
-DEFAULT_PROMPT = (
-    "本日の決算銘柄を分析し、決算サプライズの確度とリスクを比較して、"
-    "自信のあるものだけで注文判断を出してください。"
-)
 CODEX_ENV_ALLOWLIST = {
     "CODEX_ACCESS_TOKEN",
     "CODEX_HOME",
@@ -51,16 +49,9 @@ CODEX_ENV_ALLOWLIST = {
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Codex SDKで決算カレンダーの銘柄を分析し、提出用JSONを作成します。"
+    return parse_prompt_args(
+        "Codex SDKで決算カレンダーの銘柄を分析し、提出用JSONを作成します。"
     )
-    parser.add_argument(
-        "prompt",
-        nargs="?",
-        default=DEFAULT_PROMPT,
-        help="自由形式の投資戦略プロンプト",
-    )
-    return parser.parse_args()
 
 
 def invoke_agent(prompt: str, schema: dict[str, object]) -> AgentRun:
@@ -107,17 +98,8 @@ def _codex_config_overrides(workspace: str | None = None) -> tuple[str, ...]:
         "mcp_servers.yfinance.startup_timeout_sec=120",
         "mcp_servers.yfinance.tool_timeout_sec=120",
     ]
-    key = os.getenv("MOMONGA_SEARCH_API_KEY", "").strip()
-    directory = os.getenv("MOMONGA_MCP_DIR", "").strip()
-    if key or directory:
-        if not key or not directory:
-            raise ValueError(
-                "Momonga Searchを使うには MOMONGA_SEARCH_API_KEY と "
-                "MOMONGA_MCP_DIR の両方を設定してください。"
-            )
-        mcp_dir = Path(directory).expanduser().resolve()
-        if not mcp_dir.is_dir():
-            raise ValueError(f"MOMONGA_MCP_DIR が見つかりません: {mcp_dir}")
+    momonga = resolve_momonga_settings()
+    if momonga is not None:
         launcher = str(
             (
                 Path(workspace, "momonga_mcp.py")
@@ -202,9 +184,8 @@ def main() -> int:
         response = invoke_agent(session.prompt, session.schema)
         print_result(finalize_run(session, response))
         return 0
-    except (ApiError, NoOpenEvent, ValidationError, ValueError, RuntimeError) as error:
-        print(str(error), file=sys.stderr)
-        return 1
+    except CLI_ERRORS as error:
+        return exit_with_error(error)
 
 
 if __name__ == "__main__":
