@@ -34,6 +34,7 @@ class ValidationTests(unittest.TestCase):
                 "summary": "balanced",
             },
             allowed_codes={"72030", "99840"},
+            shortable_codes={"99840"},
         )
         self.assertEqual(result["orders"][0]["code"], "72030")
 
@@ -42,6 +43,7 @@ class ValidationTests(unittest.TestCase):
             validate_output(
                 {"orders": [], "summary": "ノートレード"},
                 allowed_codes={"72030"},
+                shortable_codes=set(),
             ),
             {"orders": [], "summary": "ノートレード"},
         )
@@ -59,18 +61,6 @@ class ValidationTests(unittest.TestCase):
                 shortable_codes=set(),
             )
         self.assertIn("ショートできません", " ".join(context.exception.errors))
-
-    def test_skips_short_check_when_api_omits_shortable(self) -> None:
-        result = validate_output(
-            {
-                "orders": [
-                    {"code": "99840", "weight_bps": -1000, "reason": "short"}
-                ],
-                "summary": "short",
-            },
-            allowed_codes={"99840"},
-        )
-        self.assertEqual(result["orders"][0]["weight_bps"], -1000)
 
     def test_rejects_rule_breaches(self) -> None:
         with self.assertRaises(ValidationError) as context:
@@ -96,6 +86,7 @@ class ValidationTests(unittest.TestCase):
                     "summary": "invalid",
                 },
                 allowed_codes={"72030"},
+                shortable_codes={"99840"},
             )
         combined = " ".join(context.exception.errors)
         self.assertIn("重複", combined)

@@ -144,12 +144,9 @@ def validate_output(
     value: Any,
     *,
     allowed_codes: set[str],
-    shortable_codes: set[str] | None = None,
+    shortable_codes: set[str],
 ) -> dict[str, Any]:
-    """Validate and normalize an agent response before any network write.
-
-    shortable_codes が None のときはショート可否をサーバー判定に任せる。
-    """
+    """Validate and normalize an agent response before any network write."""
 
     errors: list[str] = []
     if not isinstance(value, dict):
@@ -210,7 +207,6 @@ def validate_output(
             if (
                 weight < 0
                 and code_valid
-                and shortable_codes is not None
                 and code not in shortable_codes
             ):
                 errors.append(

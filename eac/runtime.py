@@ -263,23 +263,18 @@ def published_events(event: dict[str, Any]) -> list[dict[str, Any]]:
 
 def order_constraints(
     event: dict[str, Any],
-) -> tuple[set[str], set[str] | None]:
-    """Return allowed codes and optional shortable codes for local validation."""
+) -> tuple[set[str], set[str]]:
+    """Return allowed and shortable codes for local validation."""
 
     published = published_events(event)
     allowed_codes = {
         str(item.get("code", "")).strip().upper() for item in published
     }
-    # 旧APIの応答にはshortableが無い。その場合はサーバー判定に任せる。
-    shortable_codes = (
-        {
-            str(item.get("code", "")).strip().upper()
-            for item in published
-            if item.get("shortable") is True
-        }
-        if any("shortable" in item for item in published)
-        else None
-    )
+    shortable_codes = {
+        str(item.get("code", "")).strip().upper()
+        for item in published
+        if item.get("shortable") is True
+    }
     return allowed_codes, shortable_codes
 
 
